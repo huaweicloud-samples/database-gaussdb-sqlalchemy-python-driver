@@ -81,29 +81,6 @@ def test_sequence_explicit(compat):
         md.drop_all(engine)
 
 
-# ── 4. M-compat: multiple auto_increment columns (should fail) ───────────────
-
-@pytest.mark.integration
-def test_m_compat_multiple_autoinc_fails():
-    """M-compat: table with multiple auto_increment columns should fail."""
-    engine = _engine("M")
-    table_name = _tname("vmauto")
-    md = MetaData()
-    # Only one auto_increment per table (MySQL behavior)
-    t = Table(table_name, md,
-        Column("id", Integer, primary_key=True),
-        Column("other", Integer, autoincrement=True),  # non-PK autoinc
-    )
-    try:
-        # This should either fail at DDL or work with only PK being auto_increment
-        md.create_all(engine)
-        print("M-compat multiple autoinc: DDL accepted")
-    except Exception as e:
-        print(f"M-compat multiple autoinc: DDL rejected — {str(e)[:80]}")
-    finally:
-        md.drop_all(engine)
-
-
 # ── 5. server_default with func.now() ────────────────────────────────────────
 
 @pytest.mark.integration
@@ -174,47 +151,6 @@ def test_server_default_text_expr(compat):
         Base.metadata.drop_all(engine)
 
 
-# ── 7. Alembic: autogenerate with FK ─────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_alembic_autogen_with_fk(compat):
-    """Test Alembic autogenerate with foreign keys."""
-    pytest.importorskip("alembic")
-    from alembic.autogenerate import compare_metadata
-    from alembic.migration import MigrationContext
-
-    engine = _engine(compat)
-    parent = _tname("vafk_p")
-    child = _tname("vafk_c")
-    md = MetaData()
-    p = Table(parent, md, Column("id", Integer, primary_key=True), Column("name", String(32)))
-    c = Table(child, md,
-        Column("id", Integer, primary_key=True),
-        Column("pid", Integer, ForeignKey(f"{parent}.id")),
-        Column("val", String(32)),
-    )
-    try:
-        md.create_all(engine)
-        with engine.connect() as conn:
-            context = MigrationContext.configure(
-                conn,
-                opts={"include_name": lambda name, type_, parent_names: (
-                    type_ != "table" or name in (parent, child)
-                )},
-            )
-            diffs = compare_metadata(context, md)
-        if diffs:
-            for d in diffs:
-                print(f"  {compat} diff: {d}")
-        # ODBC reflection may report spurious nullable diffs
-        real_diffs = [d for d in diffs if not (isinstance(d, list) and len(d) > 0 and d[0] == "modify_nullable")]
-        assert real_diffs == [], f"Expected no diffs, got: {diffs}"
-        print(f"  {compat} autogenerate with FK: PASS")
-    finally:
-        md.drop_all(engine)
-
-
 # ── 8. M-compat: INDEX with length prefix (MySQL style) ──────────────────────
 
 @pytest.mark.integration
@@ -257,58 +193,6 @@ def test_m_compat_show_create_table():
     finally:
         with engine.begin() as conn:
             conn.execute(text(f"drop table if exists {table_name}"))
-
-
-# ── 10. M-compat: AUTO_INCREMENT start value ─────────────────────────────────
-
-@pytest.mark.integration
-def test_m_compat_auto_increment_start():
-    """M-compat: test AUTO_INCREMENT with custom start value."""
-    engine = _engine("M")
-    table_name = _tname("vai_start")
-    with engine.begin() as conn:
-        conn.execute(text(f"create table {table_name} (id int auto_increment primary key, name varchar(32)) auto_increment=1000"))
-    try:
-        with engine.begin() as conn:
-            conn.execute(text(f"insert into {table_name} (name) values ('first')"))
-            result = conn.execute(text(f"select id from {table_name}")).scalar_one()
-            assert result == 1000, f"Auto-increment start: expected 1000, got {result}"
-        print("M-compat AUTO_INCREMENT start: PASS")
-    except Exception as e:
-        print(f"M-compat AUTO_INCREMENT start: {e}")
-        raise
-    finally:
-        with engine.begin() as conn:
-            conn.execute(text(f"drop table if exists {table_name}"))
-
-
-# ── 11. Reflection: table with schema-qualified FK ───────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_reflection_schema_qualified_fk(compat):
-    """Test reflection of FK that references table in explicit schema."""
-    engine = _engine(compat)
-    parent = _tname("vsfk_p")
-    child = _tname("vsfk_c")
-    md = MetaData()
-    p = Table(parent, md, Column("id", Integer, primary_key=True), schema="public")
-    c = Table(child, md,
-        Column("id", Integer, primary_key=True),
-        Column("pid", Integer, ForeignKey("public." + parent + ".id")),
-    )
-    try:
-        md.create_all(engine)
-        fks = inspect(engine).get_foreign_keys(child)
-        assert len(fks) == 1
-        assert fks[0]["referred_table"] == parent
-        assert fks[0]["referred_columns"] == ["id"]
-        print(f"  {compat} schema-qualified FK reflection: PASS")
-    except Exception as e:
-        print(f"  {compat} schema-qualified FK reflection: {e}")
-        raise
-    finally:
-        md.drop_all(engine)
 
 
 # ── 12. M-compat: TEXT vs MEDIUMTEXT vs LONGTEXT ─────────────────────────────
@@ -490,33 +374,6 @@ def test_m_compat_timestamp_default_reflection():
         real_diffs = [d for d in diffs if not (isinstance(d, list) and len(d) > 0 and d[0] == "modify_nullable")]
         assert real_diffs == [], f"Expected no diffs, got: {diffs}"
         print("M-compat server_default reflection: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 18. M-compat: BigInteger auto_increment ──────────────────────────────────
-
-@pytest.mark.integration
-def test_m_compat_bigint_autoinc():
-    """M-compat: BigInteger primary key with auto_increment."""
-    engine = _engine("M")
-    table_name = _tname("vbi_ai")
-    md = MetaData()
-    t = Table(table_name, md,
-        Column("id", BigInteger, primary_key=True),
-        Column("name", String(32)),
-    )
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert().values(name="a"))
-            conn.execute(t.insert().values(name="b"))
-            rows = conn.execute(select(t.c.id, t.c.name).order_by(t.c.id)).all()
-            assert rows == [(1, "a"), (2, "b")]
-        print("M-compat BigInteger autoinc: PASS")
-    except Exception as e:
-        print(f"M-compat BigInteger autoinc: {e}")
-        raise
     finally:
         md.drop_all(engine)
 

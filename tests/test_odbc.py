@@ -114,6 +114,52 @@ def test_dbapi_connect_sets_autocommit_false(monkeypatch):
     assert conn.autocommit is False
 
 
+def test_dbapi_cursor_wrapper_normalises_text_rows(monkeypatch):
+    class FakeCursor:
+        def __init__(self):
+            self.description = [("val",)]
+
+        def execute(self, *args, **kwargs):
+            return self
+
+        def fetchone(self):
+            return ("line1\r\nline2",)
+
+        def fetchall(self):
+            return [("a\r\nb",), ("c",)]
+
+        def fetchmany(self, size=None):
+            return [("x\r\ny",)]
+
+        def __iter__(self):
+            return iter([("i\r\nj",)])
+
+    class FakeConnection:
+        autocommit = True
+
+        def add_output_converter(self, sql_type, func):
+            pass
+
+        def cursor(self):
+            return FakeCursor()
+
+    class FakePyodbc:
+        def connect(self, conn_str, **kw):
+            return FakeConnection()
+
+    monkeypatch.setitem(sys.modules, "pyodbc", FakePyodbc())
+    odbc_dbapi._dbapi = None
+
+    cursor = odbc_dbapi.connect("Driver={x};").cursor()
+
+    assert cursor.execute("select 1") is cursor
+    assert cursor.description == [("val",)]
+    assert cursor.fetchone() == ("line1\nline2",)
+    assert cursor.fetchall() == [("a\nb",), ("c",)]
+    assert cursor.fetchmany() == [("x\ny",)]
+    assert list(cursor) == [("i\nj",)]
+
+
 def test_dbapi_raises_actionable_error_when_pyodbc_missing(monkeypatch):
     def missing_module(name, *args, **kwargs):
         raise ModuleNotFoundError("No module named 'pyodbc'", name=name)
@@ -123,6 +169,13 @@ def test_dbapi_raises_actionable_error_when_pyodbc_missing(monkeypatch):
 
     with pytest.raises(ModuleNotFoundError, match="pip install pyodbc"):
         odbc_dbapi.connect("Driver={x};")
+
+
+def test_date_converter_accepts_windows_odbc_ad_suffix():
+    from datetime import date
+
+    assert odbc_dbapi._date_converter("2026-06-18 00:00:00 AD") == date(2026, 6, 18)
+    assert odbc_dbapi._date_converter(b"2026-06-18 00:00:00 AD") == date(2026, 6, 18)
 
 
 # ------------------------------------------------------------------
@@ -135,7 +188,7 @@ def test_convert_parameters_passthrough_for_tuple():
 
     original = (1, "hello", datetime(2026, 1, 1), Decimal("3.14"), b"bytes")
     converted = _convert_parameters(original)
-    assert converted == original
+    assert converted == (1, "hello", "2026-01-01 00:00:00.000000", Decimal("3.14"), b"bytes")
 
 
 def test_convert_parameters_none():
@@ -146,15 +199,29 @@ def test_convert_parameters_list():
     assert _convert_parameters([1, 2, 3]) == [1, 2, 3]
 
 
-def test_convert_parameter_passthrough():
+def test_convert_parameter_passthrough_except_datetime():
     from datetime import date
+    from datetime import datetime
     from decimal import Decimal
 
     assert _convert_parameter(42) == 42
     assert _convert_parameter("str") == "str"
     assert _convert_parameter(date(2026, 1, 1)) == date(2026, 1, 1)
+    assert _convert_parameter(datetime(2026, 1, 1, 1, 2, 3, 4)) == (
+        "2026-01-01 01:02:03.000004"
+    )
     assert _convert_parameter(Decimal("1.5")) == Decimal("1.5")
     assert _convert_parameter(b"\x00\x01") == b"\x00\x01"
+
+
+def test_convert_parameter_timezone_aware_datetime_to_naive_utc():
+    from datetime import datetime
+    from datetime import timedelta
+    from datetime import timezone
+
+    value = datetime(2026, 6, 23, 20, 0, 0, 123456, tzinfo=timezone(timedelta(hours=8)))
+
+    assert _convert_parameter(value) == "2026-06-23 12:00:00.123456"
 
 
 # ------------------------------------------------------------------

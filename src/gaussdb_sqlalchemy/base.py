@@ -25,6 +25,9 @@ from sqlalchemy.sql.compiler import OPERATORS
 import datetime as _dt
 
 
+_ODBC_DATE_RE = re.compile(r"^(\d{1,4}-\d{1,2}-\d{1,2})(?:\s+00:00:00(?:\s+AD)?)?$")
+
+
 class _GaussDBOdbcDate(sqltypes.TypeDecorator):
     """Date type that normalises ODBC driver datetime returns to date.
 
@@ -47,6 +50,12 @@ class _GaussDBOdbcDate(sqltypes.TypeDecorator):
             return value.date()
         if isinstance(value, _dt.date):
             return value
+        if isinstance(value, (bytes, bytearray)):
+            value = value.decode("utf-8")
+        if isinstance(value, str):
+            text = value.strip()
+            match = _ODBC_DATE_RE.match(text)
+            return _dt.date.fromisoformat(match.group(1) if match else text)
         return value
 
 
@@ -71,6 +80,34 @@ class _GaussDBOdbcBoolean(sqltypes.TypeDecorator):
         if isinstance(value, str):
             return value.strip().lower() in ("1", "t", "true", "y")
         return bool(value)
+
+
+def _normalise_odbc_text(value):
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode("utf-8")
+    if isinstance(value, str):
+        return value.replace("\r\n", "\n")
+    return value
+
+
+class _GaussDBOdbcString(sqltypes.TypeDecorator):
+    """String type that normalises Windows ODBC CRLF text returns."""
+
+    impl = sqltypes.String
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return _normalise_odbc_text(value)
+
+
+class _GaussDBOdbcText(sqltypes.TypeDecorator):
+    """Text type that normalises Windows ODBC CRLF text returns."""
+
+    impl = sqltypes.Text
+    cache_ok = True
+
+    def process_result_value(self, value, dialect):
+        return _normalise_odbc_text(value)
 
 
 class GaussDBCompiler(PGCompiler):

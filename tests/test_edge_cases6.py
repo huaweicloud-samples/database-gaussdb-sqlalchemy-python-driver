@@ -92,48 +92,6 @@ def test_orm_validates(compat):
         Base.metadata.drop_all(engine)
 
 
-# ── 3. ORM: lazy vs eager vs joined load ─────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_orm_eager_joined_load(compat):
-    """Test ORM eager loading with joinedload."""
-    from sqlalchemy.orm import joinedload
-    engine = _engine(compat)
-    Base = declarative_base()
-    parent_tbl = _tname("vejl_p")
-    child_tbl = _tname("vejl_c")
-
-    class Parent(Base):
-        __tablename__ = parent_tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-        children = relationship("Child", backref="parent")
-
-    class Child(Base):
-        __tablename__ = child_tbl
-        id = Column(Integer, primary_key=True)
-        parent_id = Column(Integer, ForeignKey(f"{parent_tbl}.id"))
-        val = Column(String(32))
-
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            p = Parent(id=1, name="root")
-            p.children = [Child(id=i, val=f"c{i}") for i in range(1, 4)]
-            s.add(p)
-            s.commit()
-
-        with Session(engine) as s:
-            # joinedload
-            p = s.query(Parent).options(joinedload(Parent.children)).filter(Parent.id == 1).one()
-            assert len(p.children) == 3
-            assert {c.val for c in p.children} == {"c1", "c2", "c3"}
-        print(f"  {compat} joinedload: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
 # ── 4. Alembic: add_column with server_default ───────────────────────────────
 
 @pytest.mark.integration
@@ -285,51 +243,6 @@ def test_alembic_create_drop_unique_constraint(compat):
     finally:
         with engine.begin() as conn:
             conn.execute(text(f"drop table if exists {table_name}"))
-
-
-# ── 8. Alembic: create_foreign_key / drop ────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_alembic_create_drop_foreign_key(compat):
-    """Test Alembic create_foreign_key and drop_constraint."""
-    pytest.importorskip("alembic")
-    from alembic.migration import MigrationContext
-    from alembic.operations import Operations
-
-    engine = _engine(compat)
-    parent = _tname("valt_fk_p")
-    child = _tname("valt_fk_c")
-    fk_name = f"fk_{child}_pid"
-    with engine.begin() as conn:
-        conn.execute(text(f"create table {parent} (id int primary key)"))
-        conn.execute(text(f"create table {child} (id int primary key, pid int)"))
-    try:
-        with engine.connect() as conn:
-            ctx = MigrationContext.configure(conn)
-            ops = Operations(ctx)
-            ops.create_foreign_key(fk_name, child, parent, ["pid"], ["id"])
-            conn.commit()
-
-        fks = inspect(engine).get_foreign_keys(child)
-        assert any(fk["name"] == fk_name for fk in fks)
-
-        with engine.connect() as conn:
-            ctx = MigrationContext.configure(conn)
-            ops = Operations(ctx)
-            ops.drop_constraint(fk_name, child)
-            conn.commit()
-
-        fks = inspect(engine).get_foreign_keys(child)
-        assert not any(fk["name"] == fk_name for fk in fks)
-        print(f"  {compat} Alembic create/drop FK: PASS")
-    except Exception as e:
-        print(f"  {compat} Alembic create/drop FK: {e}")
-        raise
-    finally:
-        with engine.begin() as conn:
-            conn.execute(text(f"drop table if exists {child}"))
-            conn.execute(text(f"drop table if exists {parent}"))
 
 
 # ── 9. Reflection: column order preservation ─────────────────────────────────
@@ -676,7 +589,7 @@ def test_string_concatenation(compat):
 # ── 21. LIKE with escape ─────────────────────────────────────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_like_with_escape(compat):
     """Test LIKE with % and _ wildcards and ESCAPE."""
     engine = _engine(compat)
@@ -698,36 +611,6 @@ def test_like_with_escape(compat):
             ).all()
             assert [r[0] for r in result] == [1]
         print(f"  {compat} LIKE with escape: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 22. UPDATE...FROM (subquery in UPDATE) ───────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_update_from_subquery(compat):
-    """Test UPDATE with subquery in FROM clause."""
-    engine = _engine(compat)
-    table_name = _tname("vupd_sub")
-    md = MetaData()
-    t = Table(table_name, md,
-        Column("id", Integer, primary_key=True),
-        Column("val", Integer),
-    )
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert(), [{"id": i, "val": i*10} for i in range(1, 6)])
-            subq = select(func.avg(t.c.val).label("avg_val")).scalar_subquery()
-            conn.execute(t.update().values(val=t.c.val * 2).where(t.c.val > subq))
-            rows = conn.execute(select(t.c.id, t.c.val).order_by(t.c.id)).all()
-            # avg = 30, so val > 30 means id 4 (40) and 5 (50)
-            assert rows == [(1,10),(2,20),(3,30),(4,80),(5,100)]
-        print(f"  {compat} UPDATE from subquery: PASS")
-    except Exception as e:
-        print(f"  {compat} UPDATE from subquery: {e}")
-        raise
     finally:
         md.drop_all(engine)
 

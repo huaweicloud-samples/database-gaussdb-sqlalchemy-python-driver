@@ -10,6 +10,9 @@ from sqlalchemy.schema import CreateIndex
 from sqlalchemy.schema import CreateTable
 
 from gaussdb_sqlalchemy.base import GaussDBDialect
+from gaussdb_sqlalchemy.base import _GaussDBOdbcDate
+from gaussdb_sqlalchemy.base import _GaussDBOdbcString
+from gaussdb_sqlalchemy.base import _GaussDBOdbcText
 
 
 class _ScalarResult:
@@ -162,6 +165,24 @@ def test_m_compat_disables_returning_and_native_boolean():
     assert dialect.insert_executemany_returning is False
     assert dialect.preexecute_autoincrement_sequences is False
     assert dialect.insert_null_pk_still_autoincrements is True
+
+
+def test_odbc_date_type_normalises_windows_ad_suffix():
+    from datetime import date
+
+    typ = _GaussDBOdbcDate()
+
+    assert typ.process_result_value("2026-06-18 00:00:00 AD", None) == date(2026, 6, 18)
+    assert typ.process_result_value(b"2026-06-18 00:00:00 AD", None) == date(2026, 6, 18)
+
+
+def test_odbc_string_types_normalise_windows_crlf():
+    assert _GaussDBOdbcString().process_result_value("line1\r\nline2", None) == (
+        "line1\nline2"
+    )
+    assert _GaussDBOdbcText().process_result_value(b"line1\r\nline2", None) == (
+        "line1\nline2"
+    )
 
 
 def test_m_compat_isolation_level_uses_mysql_style_session_syntax():
@@ -479,3 +500,17 @@ def test_m_compat_integer_primary_key_uses_auto_increment():
 
     assert "id INTEGER NOT NULL AUTO_INCREMENT" in compiled
     assert "SERIAL" not in compiled
+
+
+def test_m_compat_big_integer_primary_key_uses_auto_increment():
+    from sqlalchemy import BigInteger
+
+    dialect = GaussDBDialect()
+    dialect.gaussdb_compatibility = "M"
+    metadata = MetaData()
+    table = Table("demo", metadata, Column("id", BigInteger, primary_key=True))
+
+    compiled = str(CreateTable(table).compile(dialect=dialect))
+
+    assert "id BIGINT NOT NULL AUTO_INCREMENT" in compiled
+    assert "BIGSERIAL" not in compiled

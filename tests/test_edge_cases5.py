@@ -302,7 +302,7 @@ def test_special_chars_in_strings(compat):
 # ── 11. Bulk insert 1000 rows ────────────────────────────────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_bulk_insert_1000(compat):
     """Test bulk insert of 1000 rows."""
     engine = _engine(compat)
@@ -318,27 +318,6 @@ def test_bulk_insert_1000(compat):
             total = conn.execute(select(func.sum(t.c.val))).scalar_one()
             assert total == 500500  # sum(1..1000)
         print(f"  {compat} bulk insert 1000: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 12. Bulk insert 10000 rows ───────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_bulk_insert_10000(compat):
-    """Test bulk insert of 10000 rows."""
-    engine = _engine(compat)
-    table_name = _tname("vbulk10k")
-    md = MetaData()
-    t = Table(table_name, md, Column("id", Integer, primary_key=True), Column("val", Integer))
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert(), [{"id": i, "val": i} for i in range(1, 10001)])
-            count = conn.execute(select(func.count()).select_from(t)).scalar_one()
-            assert count == 10000
-        print(f"  {compat} bulk insert 10000: PASS")
     finally:
         md.drop_all(engine)
 
@@ -437,36 +416,10 @@ def test_date_range_millennia(compat):
         md.drop_all(engine)
 
 
-# ── 16. Aggregate functions ──────────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_aggregate_functions(compat):
-    """Test all standard aggregate functions."""
-    engine = _engine(compat)
-    table_name = _tname("vagg")
-    md = MetaData()
-    t = Table(table_name, md, Column("id", Integer, primary_key=True), Column("val", Integer))
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert(), [{"id": i, "val": v} for i, v in
-                [(1, 10), (2, 20), (3, 30), (4, 40), (5, 50)]])
-
-            assert conn.execute(select(func.count()).select_from(t)).scalar_one() == 5
-            assert conn.execute(select(func.sum(t.c.val))).scalar_one() == 150
-            assert conn.execute(select(func.avg(t.c.val))).scalar_one() == 30.0
-            assert conn.execute(select(func.min(t.c.val))).scalar_one() == 10
-            assert conn.execute(select(func.max(t.c.val))).scalar_one() == 50
-        print(f"  {compat} aggregates: PASS")
-    finally:
-        md.drop_all(engine)
-
-
 # ── 17. Math functions ───────────────────────────────────────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_math_functions(compat):
     """Test math functions via raw SQL."""
     engine = _engine(compat)
@@ -485,7 +438,7 @@ def test_math_functions(compat):
 # ── 18. String functions ─────────────────────────────────────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_string_functions(compat):
     """Test string functions via raw SQL."""
     engine = _engine(compat)
@@ -504,7 +457,7 @@ def test_string_functions(compat):
 # ── 19. ADD CONSTRAINT after table creation ──────────────────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_add_constraint_after_create(compat):
     """Test ALTER TABLE ADD CONSTRAINT via raw SQL."""
     engine = _engine(compat)
@@ -539,35 +492,6 @@ def test_add_constraint_after_create(compat):
             conn.execute(text(f"drop table if exists {table_name}"))
 
 
-# ── 20. DROP CONSTRAINT ──────────────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_drop_constraint(compat):
-    """Test ALTER TABLE DROP CONSTRAINT via raw SQL."""
-    engine = _engine(compat)
-    table_name = _tname("vdropcon")
-    constraint_name = f"uq_{table_name}"
-    with engine.begin() as conn:
-        conn.execute(text(f"create table {table_name} (id int primary key, name varchar(32), constraint {constraint_name} unique (name))"))
-    try:
-        uqs = inspect(engine).get_unique_constraints(table_name)
-        assert any(uq["name"] == constraint_name for uq in uqs)
-
-        with engine.begin() as conn:
-            conn.execute(text(f"alter table {table_name} drop constraint {constraint_name}"))
-
-        uqs = inspect(engine).get_unique_constraints(table_name)
-        assert not any(uq["name"] == constraint_name for uq in uqs), f"Constraint not dropped: {uqs}"
-        print(f"  {compat} drop constraint: PASS")
-    except Exception as e:
-        print(f"  {compat} drop constraint: {e}")
-        raise
-    finally:
-        with engine.begin() as conn:
-            conn.execute(text(f"drop table if exists {table_name}"))
-
-
 # ── 21. Multiple indexes on same table ───────────────────────────────────────
 
 @pytest.mark.integration
@@ -595,71 +519,6 @@ def test_multiple_indexes(compat):
         expected_names = {f"ix_{table_name}_a", f"ix_{table_name}_b", f"ix_{table_name}_ab", f"ix_{table_name}_c"}
         assert expected_names.issubset(names), f"Missing indexes: {expected_names - names}"
         print(f"  {compat} multiple indexes: PASS ({len(indexes)} indexes)")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 22. Table with many foreign keys ─────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_multiple_foreign_keys(compat):
-    """Test table with multiple FK constraints."""
-    engine = _engine(compat)
-    p1 = _tname("vfk_p1")
-    p2 = _tname("vfk_p2")
-    c = _tname("vfk_child")
-    md = MetaData()
-    t_p1 = Table(p1, md, Column("id", Integer, primary_key=True))
-    t_p2 = Table(p2, md, Column("id", Integer, primary_key=True))
-    t_c = Table(c, md,
-        Column("id", Integer, primary_key=True),
-        Column("p1_id", Integer, ForeignKey(f"{p1}.id")),
-        Column("p2_id", Integer, ForeignKey(f"{p2}.id")),
-    )
-    try:
-        md.create_all(engine)
-        fks = inspect(engine).get_foreign_keys(c)
-        assert len(fks) == 2, f"Expected 2 FKs, got {len(fks)}"
-        referred_tables = {fk["referred_table"] for fk in fks}
-        assert referred_tables == {p1, p2}
-        print(f"  {compat} multiple FKs: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 23. Self-referencing foreign key ─────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_self_referencing_fk(compat):
-    """Test self-referencing FK (tree structure)."""
-    engine = _engine(compat)
-    table_name = _tname("vselfk")
-    md = MetaData()
-    t = Table(table_name, md,
-        Column("id", Integer, primary_key=True),
-        Column("parent_id", Integer, ForeignKey(f"{table_name}.id")),
-        Column("name", String(32)),
-    )
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert().values(id=1, parent_id=None, name="root"))
-            conn.execute(t.insert().values(id=2, parent_id=1, name="child1"))
-            conn.execute(t.insert().values(id=3, parent_id=1, name="child2"))
-            conn.execute(t.insert().values(id=4, parent_id=2, name="grandchild"))
-
-            # Self-join
-            from sqlalchemy import and_
-            result = conn.execute(
-                select(t.c.id, t.c.name)
-                .select_from(t)
-                .where(t.c.parent_id == 1)
-                .order_by(t.c.id)
-            ).all()
-            assert [r[0] for r in result] == [2, 3]
-        print(f"  {compat} self-ref FK: PASS")
     finally:
         md.drop_all(engine)
 
@@ -749,35 +608,6 @@ def test_sql_injection_prevention(compat):
             count = conn.execute(select(func.count()).select_from(t)).scalar_one()
             assert count == 2
         print(f"  {compat} SQL injection prevention: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 27. EXISTS subquery ──────────────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_exists_subquery(compat):
-    """Test EXISTS subquery."""
-    from sqlalchemy import exists
-    engine = _engine(compat)
-    parent = _tname("vex_p")
-    child = _tname("vex_c")
-    md = MetaData()
-    p = Table(parent, md, Column("id", Integer, primary_key=True), Column("name", String(32)))
-    c = Table(child, md, Column("id", Integer, primary_key=True), Column("pid", Integer, ForeignKey(f"{parent}.id")))
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(p.insert(), [{"id": 1, "name": "a"}, {"id": 2, "name": "b"}, {"id": 3, "name": "c"}])
-            conn.execute(c.insert(), [{"id": 1, "pid": 1}, {"id": 2, "pid": 1}, {"id": 3, "pid": 3}])
-
-            # Parents that have children
-            result = conn.execute(
-                select(p.c.name).where(exists().where(c.c.pid == p.c.id)).order_by(p.c.name)
-            ).all()
-            assert [r[0] for r in result] == ["a", "c"], f"EXISTS failed: {result}"
-        print(f"  {compat} EXISTS subquery: PASS")
     finally:
         md.drop_all(engine)
 

@@ -33,6 +33,10 @@ def _load_dbapi() -> ModuleType:
 
 
 import datetime as _dt
+import re as _re
+
+
+_DATE_RE = _re.compile(r"^(\d{1,4}-\d{1,2}-\d{1,2})(?:\s+00:00:00(?:\s+AD)?)?$")
 
 
 def _bool_converter(value):
@@ -60,9 +64,12 @@ def _date_converter(value):
         return value
     if isinstance(value, (bytes, bytearray)):
         s = value.decode("utf-8").strip()
-        return _dt.date.fromisoformat(s)
+        match = _DATE_RE.match(s)
+        return _dt.date.fromisoformat(match.group(1) if match else s)
     if isinstance(value, str):
-        return _dt.date.fromisoformat(value.strip())
+        s = value.strip()
+        match = _DATE_RE.match(s)
+        return _dt.date.fromisoformat(match.group(1) if match else s)
     return value
 
 
@@ -83,6 +90,68 @@ def _text_converter(value):
     if isinstance(value, str):
         return value.replace("\r\n", "\n")
     return str(value)
+
+
+def _normalise_output_value(value):
+    if isinstance(value, str):
+        return value.replace("\r\n", "\n")
+    return value
+
+
+def _normalise_output_row(row):
+    if row is None:
+        return None
+    return tuple(_normalise_output_value(value) for value in row)
+
+
+class _CursorWrapper:
+    def __init__(self, cursor):
+        self._cursor = cursor
+
+    def execute(self, *args, **kwargs):
+        self._cursor.execute(*args, **kwargs)
+        return self
+
+    def executemany(self, *args, **kwargs):
+        self._cursor.executemany(*args, **kwargs)
+        return self
+
+    def fetchone(self):
+        return _normalise_output_row(self._cursor.fetchone())
+
+    def fetchmany(self, size=None):
+        if size is None:
+            return [_normalise_output_row(row) for row in self._cursor.fetchmany()]
+        return [_normalise_output_row(row) for row in self._cursor.fetchmany(size)]
+
+    def fetchall(self):
+        return [_normalise_output_row(row) for row in self._cursor.fetchall()]
+
+    def __iter__(self):
+        for row in self._cursor:
+            yield _normalise_output_row(row)
+
+    def __getattr__(self, name):
+        return getattr(self._cursor, name)
+
+
+class _ConnectionWrapper:
+    def __init__(self, connection):
+        self._connection = connection
+
+    def cursor(self):
+        return _CursorWrapper(self._connection.cursor())
+
+    @property
+    def autocommit(self):
+        return self._connection.autocommit
+
+    @autocommit.setter
+    def autocommit(self, value):
+        self._connection.autocommit = value
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
 
 
 def _patch_connection(conn):
@@ -122,7 +191,7 @@ def _patch_connection(conn):
     conn.add_output_converter(1, _text_converter)
     conn.add_output_converter(-96, _text_converter)
 
-    return conn
+    return _ConnectionWrapper(conn)
 
 
 def connect(connection_string: str, **kwargs: Any):

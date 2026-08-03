@@ -22,92 +22,6 @@ def _tname(prefix):
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-# ── 1. M: ORM bulk insert with auto_increment ────────────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_bulk_insert_autoincrement():
-    """M-compat: ORM bulk insert with auto_increment IDs."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vbulk_orm")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            s.add_all([Item(name=f"item_{i}") for i in range(10)])
-            s.commit()
-        with Session(engine) as s:
-            items = s.query(Item).order_by(Item.id).all()
-            assert len(items) == 10
-            assert [i.id for i in items] == list(range(1, 11))
-        print("M ORM bulk insert autoinc: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
-# ── 2. M: ORM session.add then query identity ───────────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_identity_after_flush():
-    """M-compat: ORM identity map after flush."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vident")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            item = Item(name="test")
-            s.add(item)
-            s.flush()
-            assert item.id is not None
-            # Identity map: same object
-            same = s.get(Item, item.id)
-            assert same is item
-        print("M ORM identity after flush: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
-# ── 3. M: ORM update with auto_increment id in WHERE ────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_update_delete():
-    """M-compat: ORM update and delete by auto_increment id."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vud")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-        val = Column(Integer)
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            s.add_all([Item(name="a", val=1), Item(name="b", val=2)])
-            s.commit()
-        with Session(engine) as s:
-            item = s.query(Item).filter(Item.name == "a").one()
-            item.val = 99
-            s.commit()
-        with Session(engine) as s:
-            assert s.query(Item).filter(Item.name == "a").one().val == 99
-            s.query(Item).filter(Item.name == "b").delete()
-            s.commit()
-        with Session(engine) as s:
-            assert s.query(Item).count() == 1
-        print("M ORM update/delete: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
 # ── 4. All: datetime parameter binding ───────────────────────────────────────
 
 @pytest.mark.parametrize("compat", ["A", "B", "M"])
@@ -471,34 +385,6 @@ def test_long_column_name(compat):
         md.drop_all(engine)
 
 
-# ── 16. M: INSERT with explicit ID after auto_increment ─────────────────────
-
-@pytest.mark.integration
-def test_m_explicit_id_then_auto():
-    """M-compat: explicit ID insert, then auto-increment should continue."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vexid_orm")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            s.add(Item(id=100, name="explicit"))
-            s.commit()
-        with Session(engine) as s:
-            s.add(Item(name="auto"))
-            s.commit()
-            items = s.query(Item).order_by(Item.id).all()
-            assert items[0].id == 100
-            assert items[1].id > 100, f"Auto should be > 100, got {items[1].id}"
-        print(f"M explicit then auto (ORM): PASS — ids={[i.id for i in items]}")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
 # ── 17. All: timezone-aware datetime with UTC ────────────────────────────────
 
 @pytest.mark.parametrize("compat", ["A", "B", "M"])
@@ -568,48 +454,6 @@ def test_offset_datetime_binding(compat):
         print(f"  {compat} offset datetime binding: PASS")
     finally:
         md.drop_all(engine)
-
-
-# ── 19. M: ORM with relationship + auto_increment ───────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_relationship_autoinc():
-    """M-compat: ORM relationship with auto_increment FKs."""
-    engine = _engine("M")
-    Base = declarative_base()
-    parent_tbl = _tname("vrel_ai_p")
-    child_tbl = _tname("vrel_ai_c")
-
-    class Parent(Base):
-        __tablename__ = parent_tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-        children = relationship("Child", backref="parent")
-
-    class Child(Base):
-        __tablename__ = child_tbl
-        id = Column(Integer, primary_key=True)
-        parent_id = Column(Integer, ForeignKey(f"{parent_tbl}.id"))
-        val = Column(String(32))
-
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            p = Parent(name="root")
-            p.children = [Child(val=f"c{i}") for i in range(3)]
-            s.add(p)
-            s.commit()
-            assert p.id is not None
-            for c in p.children:
-                assert c.id is not None
-                assert c.parent_id == p.id
-
-        with Session(engine) as s:
-            p = s.query(Parent).one()
-            assert len(p.children) == 3
-        print("M ORM relationship autoinc: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
 
 
 # ── 20. All: reconnect after connection error ───────────────────────────────

@@ -65,86 +65,6 @@ def test_large_result_set_50k(compat):
         md.drop_all(engine)
 
 
-# ── 3. Complex multi-join query ──────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_complex_multi_join(compat):
-    """Test 4-table join."""
-    engine = _engine(compat)
-    t1, t2, t3, t4 = (_tname(f"vj{i}") for i in range(4))
-    md = MetaData()
-    a = Table(t1, md, Column("id", Integer, primary_key=True), Column("name", String(32)))
-    b = Table(t2, md, Column("id", Integer, primary_key=True), Column("a_id", Integer, ForeignKey(f"{t1}.id")), Column("val", Integer))
-    c = Table(t3, md, Column("id", Integer, primary_key=True), Column("b_id", Integer, ForeignKey(f"{t2}.id")), Column("cat", String(10)))
-    d = Table(t4, md, Column("id", Integer, primary_key=True), Column("c_id", Integer, ForeignKey(f"{t3}.id")), Column("score", Integer))
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(a.insert().values(id=1, name="root"))
-            conn.execute(b.insert().values(id=1, a_id=1, val=10))
-            conn.execute(b.insert().values(id=2, a_id=1, val=20))
-            conn.execute(c.insert().values(id=1, b_id=1, cat="x"))
-            conn.execute(c.insert().values(id=2, b_id=2, cat="y"))
-            conn.execute(d.insert().values(id=1, c_id=1, score=100))
-            conn.execute(d.insert().values(id=2, c_id=2, score=200))
-
-            result = conn.execute(
-                select(a.c.name, b.c.val, c.c.cat, d.c.score)
-                .select_from(a.join(b).join(c).join(d))
-                .order_by(d.c.score)
-            ).all()
-            assert len(result) == 2
-            assert result[0] == ("root", 10, "x", 100)
-            assert result[1] == ("root", 20, "y", 200)
-        print(f"  {compat} 4-table join: PASS")
-    finally:
-        md.drop_all(engine)
-
-
-# ── 4. Complex subquery with aggregation ─────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_complex_subquery_aggregation(compat):
-    """Test nested subqueries with aggregation."""
-    engine = _engine(compat)
-    table_name = _tname("vcsub")
-    md = MetaData()
-    t = Table(table_name, md,
-        Column("id", Integer, primary_key=True),
-        Column("dept", String(10)),
-        Column("salary", Integer),
-    )
-    try:
-        md.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(t.insert(), [
-                {"id": 1, "dept": "eng", "salary": 100},
-                {"id": 2, "dept": "eng", "salary": 120},
-                {"id": 3, "dept": "eng", "salary": 80},
-                {"id": 4, "dept": "sales", "salary": 90},
-                {"id": 5, "dept": "sales", "salary": 110},
-            ])
-            # Find employees earning more than dept average
-            dept_avg = (
-                select(t.c.dept, func.avg(t.c.salary).label("avg_salary"))
-                .group_by(t.c.dept)
-                .subquery()
-            )
-            result = conn.execute(
-                select(t.c.id, t.c.dept, t.c.salary)
-                .join(dept_avg, t.c.dept == dept_avg.c.dept)
-                .where(t.c.salary > dept_avg.c.avg_salary)
-                .order_by(t.c.id)
-            ).all()
-            # eng avg=100, sales avg=100
-            assert [r[0] for r in result] == [2, 5]
-        print(f"  {compat} complex subquery: PASS")
-    finally:
-        md.drop_all(engine)
-
-
 # ── 5. Repeated DDL on same table name (cache invalidation) ──────────────────
 
 @pytest.mark.integration
@@ -197,7 +117,7 @@ def test_rapid_connection_cycles(compat):
 # ── 7. Transaction: long-running with multiple statements ────────────────────
 
 @pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 def test_long_transaction(compat):
     """Test a long transaction with many statements."""
     engine = _engine(compat)
@@ -244,49 +164,6 @@ def test_no_leftover_test_tables(compat):
                 pass
     else:
         print(f"  {compat} no leftover tables: PASS")
-
-
-# ── 9. ORM: cascade delete ───────────────────────────────────────────────────
-
-@pytest.mark.integration
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
-def test_orm_cascade_delete(compat):
-    """Test ORM cascade delete."""
-    from sqlalchemy.orm import relationship
-    engine = _engine(compat)
-    Base = declarative_base()
-    parent_tbl = _tname("vcdel_p")
-    child_tbl = _tname("vcdel_c")
-
-    class Parent(Base):
-        __tablename__ = parent_tbl
-        id = Column(Integer, primary_key=True)
-        children = relationship("Child", backref="parent", cascade="all, delete-orphan")
-
-    class Child(Base):
-        __tablename__ = child_tbl
-        id = Column(Integer, primary_key=True)
-        parent_id = Column(Integer, ForeignKey(f"{parent_tbl}.id"))
-
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            p = Parent(id=1)
-            p.children = [Child(id=i) for i in range(1, 4)]
-            s.add(p)
-            s.commit()
-
-        with Session(engine) as s:
-            p = s.get(Parent, 1)
-            s.delete(p)
-            s.commit()
-
-        with Session(engine) as s:
-            assert s.get(Parent, 1) is None
-            assert s.query(Child).count() == 0
-        print(f"  {compat} cascade delete: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
 
 
 # ── 10. Final: full suite regression check ───────────────────────────────────

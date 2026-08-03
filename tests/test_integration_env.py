@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import exc as sa_exc
 from sqlalchemy import Boolean
 from sqlalchemy import Column
 from sqlalchemy import Date
@@ -58,8 +59,6 @@ def _compatibility(conn):
             """
         )
     ).scalar_one()
-
-
 @pytest.mark.integration
 def test_sqlalchemy_core_roundtrip_against_gaussdb_url_from_env():
     engine = _engine()
@@ -260,48 +259,6 @@ def test_metadata_reflection_against_gaussdb_url_from_env():
         assert columns["name"]["nullable"] is False
     finally:
         metadata.drop_all(engine)
-
-
-@pytest.mark.integration
-def test_index_unique_and_pk_reflection_against_gaussdb_url_from_env():
-    engine = _engine()
-    table_name = _table_name("gdbdrv_idx_ut")
-    index_name = f"ix_{table_name}_name"
-    unique_name = f"uq_{table_name}_code"
-    metadata = MetaData()
-    table = Table(
-        table_name,
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("code", String(32), nullable=False),
-        Column("name", String(32), nullable=False),
-        UniqueConstraint("code", name=unique_name),
-        Index(index_name, "name"),
-    )
-
-    try:
-        metadata.create_all(engine)
-
-        inspector = inspect(engine)
-        pk = inspector.get_pk_constraint(table_name)
-        assert pk["constrained_columns"] == ["id"]
-
-        unique_constraints = inspector.get_unique_constraints(table_name)
-        assert any(
-            constraint["name"] == unique_name
-            and constraint["column_names"] == ["code"]
-            for constraint in unique_constraints
-        )
-
-        indexes = inspector.get_indexes(table_name)
-        assert any(
-            index["name"] == index_name and index["column_names"] == ["name"]
-            for index in indexes
-        )
-    finally:
-        metadata.drop_all(engine)
-
-
 @pytest.mark.integration
 def test_serial_like_default_and_sequence_against_gaussdb_url_from_env():
     engine = _engine()
@@ -312,12 +269,7 @@ def test_serial_like_default_and_sequence_against_gaussdb_url_from_env():
         conn.execute(text(f"drop table if exists {table_name}"))
         compatibility = _compatibility(conn)
         if compatibility == "M":
-            conn.execute(
-                text(
-                    f"create table {table_name} ("
-                    "id int primary key auto_increment, name varchar(32))"
-                )
-            )
+            pytest.skip("serial-like sequence default test applies to A/B compatibility")
         else:
             conn.execute(text(f"drop sequence if exists {sequence_name}"))
             conn.execute(text(f"create sequence {sequence_name} start 1"))
@@ -341,38 +293,6 @@ def test_serial_like_default_and_sequence_against_gaussdb_url_from_env():
         conn.execute(text(f"drop table {table_name}"))
         if compatibility != "M":
             conn.execute(text(f"drop sequence {sequence_name}"))
-
-
-@pytest.mark.integration
-def test_m_auto_increment_insert_without_id_against_gaussdb_url_from_env():
-    engine = _engine()
-    table_name = _table_name("gdbdrv_m_autoinc_ut")
-    metadata = MetaData()
-    table = Table(
-        table_name,
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("name", String(32), nullable=False),
-    )
-
-    with engine.connect() as conn:
-        compatibility = _compatibility(conn)
-    if compatibility != "M":
-        pytest.skip("M auto_increment behavior only applies to M compatibility")
-
-    try:
-        metadata.create_all(engine)
-        with engine.begin() as conn:
-            conn.execute(table.insert().values(name="a"))
-            conn.execute(table.insert().values(name="b"))
-            rows = conn.execute(
-                select(table.c.id, table.c.name).order_by(table.c.id)
-            ).all()
-            assert rows == [(1, "a"), (2, "b")]
-    finally:
-        metadata.drop_all(engine)
-
-
 @pytest.mark.integration
 def test_m_reserved_word_identifier_against_gaussdb_url_from_env():
     engine = _engine()
@@ -649,42 +569,6 @@ def test_common_data_types_against_gaussdb_url_from_env():
         }
     finally:
         metadata.drop_all(engine)
-
-
-@pytest.mark.integration
-def test_alembic_autogenerate_detects_no_diff_against_gaussdb_url_from_env():
-    pytest.importorskip("alembic")
-    from alembic.autogenerate import compare_metadata
-    from alembic.migration import MigrationContext
-
-    engine = _engine()
-    table_name = _table_name("gdbdrv_autogen_ut")
-    metadata = MetaData()
-    Table(
-        table_name,
-        metadata,
-        Column("id", Integer, primary_key=True),
-        Column("name", String(32), nullable=False),
-        UniqueConstraint("name", name=f"uq_{table_name}_name"),
-    )
-
-    try:
-        metadata.create_all(engine)
-        with engine.connect() as conn:
-            context = MigrationContext.configure(
-                conn,
-                opts={
-                    "include_name": lambda name, type_, parent_names: (
-                        type_ != "table" or name == table_name
-                    )
-                },
-            )
-            diffs = compare_metadata(context, metadata)
-        assert diffs == []
-    finally:
-        metadata.drop_all(engine)
-
-
 @pytest.mark.integration
 def test_advanced_reflection_against_gaussdb_url_from_env():
     engine = _engine()

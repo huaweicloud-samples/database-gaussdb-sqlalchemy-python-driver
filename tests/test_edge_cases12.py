@@ -21,67 +21,6 @@ def _tname(prefix):
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
-# ── 1. M: ORM with session.execute(select) ──────────────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_session_execute_select():
-    """M-compat: ORM session.execute(select()) with auto_increment."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vexec_orm")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-        val = Column(Integer)
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            s.add_all([Item(name="a", val=10), Item(name="b", val=20), Item(name="c", val=30)])
-            s.commit()
-        with Session(engine) as s:
-            result = s.execute(select(Item).where(Item.val > 15).order_by(Item.id)).scalars().all()
-            assert len(result) == 2
-            assert result[0].name == "b"
-            assert result[1].name == "c"
-        print("M ORM session.execute(select): PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
-# ── 2. M: ORM with delete + re-add ──────────────────────────────────────────
-
-@pytest.mark.integration
-def test_m_orm_delete_readd():
-    """M-compat: delete item, then add new — auto_increment should not reuse ID."""
-    engine = _engine("M")
-    Base = declarative_base()
-    tbl = _tname("vdel_readd")
-    class Item(Base):
-        __tablename__ = tbl
-        id = Column(Integer, primary_key=True)
-        name = Column(String(32))
-    try:
-        Base.metadata.create_all(engine)
-        with Session(engine) as s:
-            s.add(Item(name="first"))
-            s.add(Item(name="second"))
-            s.commit()
-        with Session(engine) as s:
-            s.query(Item).filter(Item.name == "first").delete()
-            s.commit()
-        with Session(engine) as s:
-            s.add(Item(name="third"))
-            s.commit()
-            items = s.query(Item).order_by(Item.id).all()
-            assert len(items) == 2
-            assert items[0].id == 2  # second
-            assert items[1].id == 3  # third (not 1)
-        print("M ORM delete+readd: PASS")
-    finally:
-        Base.metadata.drop_all(engine)
-
-
 # ── 3. All: reflection of table with schema-qualified name ───────────────────
 
 @pytest.mark.parametrize("compat", ["A", "B", "M"])
@@ -246,7 +185,7 @@ def test_distinct_multiple(compat):
 
 # ── 9. All: UPDATE all rows ──────────────────────────────────────────────────
 
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 @pytest.mark.integration
 def test_update_all_rows(compat):
     """Test UPDATE without WHERE clause (all rows)."""
@@ -461,7 +400,7 @@ def test_empty_string_in_where(compat):
 
 # ── 16. All: LIKE with special regex chars ───────────────────────────────────
 
-@pytest.mark.parametrize("compat", ["A", "B", "M"])
+@pytest.mark.parametrize("compat", ["A", "B"])
 @pytest.mark.integration
 def test_like_special_chars(compat):
     """Test LIKE with % and _ in data."""

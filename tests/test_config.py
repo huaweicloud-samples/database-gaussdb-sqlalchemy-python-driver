@@ -16,6 +16,7 @@ If GAUSSDB_HOST is not set, integration tests are skipped automatically.
 import os
 from urllib.parse import quote_plus
 
+
 GAUSSDB_HOST = os.environ.get("GAUSSDB_HOST")
 GAUSSDB_PORT = os.environ.get("GAUSSDB_PORT", "19995")
 GAUSSDB_USER = os.environ.get("GAUSSDB_USER", "")

@@ -14,6 +14,7 @@ DSN (pre-configured in ODBC Data Source Administrator)::
 
 from __future__ import annotations
 
+import datetime as _dt
 import re
 from typing import Any
 from urllib.parse import quote_plus
@@ -23,7 +24,13 @@ from sqlalchemy import types as sqltypes
 
 from . import odbc_dbapi
 from .alembic import register_alembic_impl
-from .base import GaussDBDialect, _GaussDBOdbcDate, _GaussDBOdbcBoolean
+from .base import (
+    GaussDBDialect,
+    _GaussDBOdbcBoolean,
+    _GaussDBOdbcDate,
+    _GaussDBOdbcString,
+    _GaussDBOdbcText,
+)
 
 
 register_alembic_impl()
@@ -35,6 +42,10 @@ register_alembic_impl()
 _cspecs = dict(GaussDBDialect.colspecs)
 _cspecs[sqltypes.Date] = _GaussDBOdbcDate
 _cspecs[sqltypes.Boolean] = _GaussDBOdbcBoolean
+_cspecs[sqltypes.String] = _GaussDBOdbcString
+_cspecs[sqltypes.Unicode] = _GaussDBOdbcString
+_cspecs[sqltypes.Text] = _GaussDBOdbcText
+_cspecs[sqltypes.UnicodeText] = _GaussDBOdbcText
 
 # Query-string keys that are not forwarded as ODBC connection attributes.
 _CONTROL_KEYS = {"driver", "dsn"}
@@ -222,9 +233,17 @@ def _convert_parameters(parameters):
 
 
 def _convert_parameter(value):
-    # pyodbc handles datetime, date, Decimal, bytes natively.
-    # No conversion needed — this function exists as a hook for future
-    # GaussDB-specific parameter adjustments.
+    # GaussDB ODBC stores TIMESTAMP values without timezone metadata.  Normalize
+    # aware datetimes to UTC before passing a naive value to pyodbc.
+    if isinstance(value, _dt.datetime) and value.tzinfo is not None:
+        offset = value.utcoffset()
+        if offset is not None:
+            value = value.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+    if isinstance(value, _dt.datetime):
+        # GaussDB's Windows ODBC driver can truncate Python datetime parameters
+        # in M compatibility mode.  A timestamp literal string preserves the
+        # full TIMESTAMP(6) value across compatibility modes.
+        return value.strftime("%Y-%m-%d %H:%M:%S.%f")
     return value
 
 
