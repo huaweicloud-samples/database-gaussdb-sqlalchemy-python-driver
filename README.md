@@ -12,9 +12,8 @@ and **psycopg2** drivers.
 
 本仓库仅包含方言源码（`src/gaussdb_sqlalchemy/`）、测试、文档和交付附件，
 **不包含 `gaussdb` 底层驱动源码，也不包含 `libpq` 客户端库**。
-方言代码迁移自 [JarrenL 驱动仓固定提交](https://github.com/jarrenL/gaussdb-python/tree/bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb_sqlalchemy)，
-保留原许可证及历史测试结果；迁移本身不代表新增平台或真实库场景已通过验收。
-代码来源及许可证说明见 [PROVENANCE.md](PROVENANCE.md)。
+各平台及真实库场景的验证范围以测试指导和验证记录为准。
+许可证见 [LICENSE.txt](LICENSE.txt)。
 
 ## 兼容模式识别
 
@@ -48,7 +47,7 @@ Linux 部署和动态库加载请先阅读 [双驱动启动指导](docs/Linux双
   Python 版本不在当前 psycopg2 路线的交付支持范围内
 - GaussDB libpq（psycopg3 需由环境提供配套客户端库；随附官方 psycopg2 wheel 自带）
 - 至少一个 Python 驱动：
-  - `gaussdb` (psycopg3 fork) — Linux 路线安装下述固定提交的修复版驱动
+  - `gaussdb` (psycopg3 fork) — Linux 路线安装包含下述库路径加载支持的配套驱动
   - `psycopg2` — 安装 `vendor/gaussdb_psycopg2/` 中随仓库提供的 GaussDB 官方 wheel
 
 ## 底层驱动来源
@@ -68,22 +67,22 @@ Linux 部署和动态库加载请先阅读 [双驱动启动指导](docs/Linux双
 - 安装后使用 `import gaussdb`，不是 `import psycopg`。
 - 该 wheel 是纯 Python 包，运行时仍需准备与 GaussDB 匹配的 `libpq`。
 
-Linux 启动脚本使用 `GAUSSDB_LIBPQ_PATH` 指定动态库。此支持目前来自
-[JarrenL 修复版固定提交](https://github.com/jarrenL/gaussdb-python/tree/bbb81f44a0d46483961d30a58ab2171e4af384ac)，
-不能仅凭 `gaussdb>=1.0.4` 的版本号断定已包含修复；旧 PyPI 包不保证支持这个变量。
-请下载该提交的[完整源码 ZIP](https://github.com/jarrenL/gaussdb-python/archive/bbb81f44a0d46483961d30a58ab2171e4af384ac.zip)，
-解压到独立驱动目录后构建：
+Linux 启动脚本使用 `GAUSSDB_LIBPQ_PATH` 指定动态库。请使用包含该功能、
+且与目标环境匹配的配套驱动；不能仅凭 `gaussdb>=1.0.4` 的版本号判断，
+旧 PyPI 包不保证支持这个变量。驱动准备及加载验证步骤见
+[Linux 双驱动启动指导](docs/Linux双驱动启动.md)。
+如需自行构建，请在已准备好的独立驱动源码目录执行：
 
 ```bash
 # 这里是独立的 gaussdb-python 驱动源码目录，不是当前 SQLAlchemy 仓库。
-cd /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac
+cd /path/to/gaussdb-python
 python -m pip install build
 python -m build --wheel gaussdb
 # 输出：gaussdb/dist/gaussdb-1.0.4-py3-none-any.whl
 ```
 
 也可以不先构建 wheel，直接使用非 editable 安装：
-`python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb`。
+`python -m pip install /path/to/gaussdb-python/gaussdb`。
 不要在本方言仓库执行 `pip install ./gaussdb`，该目录不存在。
 底层驱动修复仍在驱动仓维护，不打进方言 wheel；完整环境配置见
 [Linux 双驱动启动指导](docs/Linux双驱动启动.md)。
@@ -208,10 +207,10 @@ python3.11 -m pip install .
 
 ### 方案二：方言 + gaussdb（psycopg3）
 
-安装已按上节从固定提交构建的驱动和方言：
+安装已按上节准备的配套驱动和方言：
 
 ```bash
-python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb/dist/gaussdb-1.0.4-py3-none-any.whl
+python -m pip install /path/to/gaussdb-python/gaussdb/dist/gaussdb-1.0.4-py3-none-any.whl
 python -m pip install packages/gaussdb_sqlalchemy-0.1.0-py3-none-any.whl
 ```
 
@@ -222,7 +221,7 @@ python -m pip install drivers/psycopg3/gaussdb-1.0.4-py3-none-any.whl
 python -m pip install dialect/gaussdb_sqlalchemy-0.1.0-py3-none-any.whl
 ```
 
-离线目录中的 `gaussdb` wheel 必须来自上节固定提交，而非只复制同版本号的旧包。
+离线目录中的 `gaussdb` wheel 必须包含上节要求的库路径加载支持，不能仅以版本号判断。
 psycopg3 的 `gaussdb` wheel 是纯 Python 包，运行环境还必须能够加载与 GaussDB
 匹配的 `libpq`。必要时配置 `LD_LIBRARY_PATH`。连接 URL 使用
 `gaussdb+psycopg://`。
@@ -400,7 +399,7 @@ JSON、二进制和约束反射的修复、实际验证范围及内网复测步�
 export GAUSSDB_SQLALCHEMY_PSYCOPG3_X86_URL='gaussdb+psycopg://user:password@host:port/dbname?sslmode=disable'
 export GAUSSDB_SQLALCHEMY_PSYCOPG2_X86_URL='gaussdb+psycopg2://user:password@host:port/dbname?sslmode=disable'
 
-python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb
+python -m pip install /path/to/gaussdb-python/gaussdb
 python -m pip install vendor/gaussdb_psycopg2/<GaussDB官方psycopg2包名>-py311-none-linux_对应CPU架构.whl
 python -m pip install '.[test]'
 python -m pytest tests -m 'not integration' -v -rs

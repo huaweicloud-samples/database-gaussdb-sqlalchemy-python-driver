@@ -3,11 +3,11 @@
 构建日期：2026-09-11。直接下载本目录的wheel即可，无需在内网重新构建。
 本包属于 `feature/sqlalchemy-dialect-psycopg2-psycopg3` 分支，不是 `main` 的 ODBC 包。
 
-- 文件：[gaussdb_sqlalchemy-0.1.0-py3-none-any.whl](gaussdb_sqlalchemy-0.1.0-py3-none-any.whl)，26,259字节。
-- SHA256：`83782654cd8ebca3f76decec0df40c43cd2e310ca787b993b93545629d3fc205`。
-- 四个运行时模块与来源提交 [bbb81f44](https://github.com/jarrenL/gaussdb-python/tree/bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb_sqlalchemy) 完全一致。
+- 文件：[gaussdb_sqlalchemy-0.1.0-py3-none-any.whl](gaussdb_sqlalchemy-0.1.0-py3-none-any.whl)，26,118字节。
+- SHA256：`138dfc5a7dc90a6bfaa156e4dad8e7fa808a853fd6fd2884a263b37947ea3187`。
+- 四个运行时模块与本仓库提交 [18bc1e1](https://github.com/huaweicloud-samples/database-gaussdb-sqlalchemy-python-driver/tree/18bc1e156d83d04a1cae49c73703c4ea7b14467e/src/gaussdb_sqlalchemy) 完全一致。
 - 包含唯一约束/索引隐藏系统列修复、普通非RETURNING INSERT rowcount修复。
-- 本次迁移调整目录、构建元数据及README，不改变运行时代码；原许可证已包含在wheel中。
+- 本次仅更新README及wheel内嵌说明，不改变运行时代码；许可证已包含在wheel中。
 - 仅包含SQLAlchemy方言，不包含psycopg2、gaussdb驱动或libpq/OpenSSL。
 - Python要求为3.9+，SQLAlchemy要求为 `>=2.0,<2.2`；底层驱动仍须匹配目标环境。
 
@@ -24,7 +24,7 @@ python -m pip check
 
 macOS可用 `shasum -a 256 -c SHA256SUMS` 校验。
 版本仍为0.1.0，必须强制重装并重启实际测试的Python进程；不要仅看版本号或文件大小判断更新。
-因仓库地址及内嵌README更新后重新构建，本包校验值与JarrenL旧成品不同。
+因内嵌README更新后重新构建，本包校验值与上一份成品不同。
 请使用实际测试虚拟环境中的python。命令不联网、不替换已安装的底层驱动；
 SQLAlchemy等运行/测试依赖必须事先准备好，不应与ODBC路线同名方言包混装。
 
