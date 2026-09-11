@@ -1,213 +1,147 @@
-"""Alembic DDL integration for the GaussDB SQLAlchemy dialect."""
+"""
+Alembic integration for GaussDB SQLAlchemy dialect.
 
+Registers an Alembic implementation that handles M-compat (MySQL) mode
+differences in ALTER TABLE syntax.
+"""
 from __future__ import annotations
 
-from sqlalchemy import text
 
-
-_REGISTERED = False
-
-
-def register_alembic_impl() -> bool:
-    """Register GaussDB with Alembic when Alembic is installed."""
-
-    global _REGISTERED
-    if _REGISTERED:
-        return True
-
+def register_alembic_impl():
+    """Register GaussDB-specific Alembic implementation."""
     try:
-        from alembic.ddl import base
-        from alembic.ddl.impl import DefaultImpl
-        from alembic.ddl.postgresql import PostgresqlImpl
-    except Exception:
-        return False
+        from alembic.ddl import postgresql as pg_impl
+        from alembic.ddl.base import ColumnNullable, ColumnType
+        from alembic.ddl.impl import _impls
+        from sqlalchemy.ext.compiler import compiles
 
-    class GaussDBMChangeColumn(base.AlterColumn):
-        def __init__(self, name, column_name, newname, type_, nullable=None, **kw):
-            super().__init__(name, column_name, **kw)
-            self.newname = newname
-            self.type_ = type_
-            self.nullable = nullable
+        # Register dialect name "gaussdb" in Alembic's impl registry
+        if "gaussdb" not in _impls:
 
-    class GaussDBMModifyColumn(base.AlterColumn):
-        def __init__(self, name, column_name, type_, nullable=None, **kw):
-            super().__init__(name, column_name, **kw)
-            self.type_ = type_
-            self.nullable = nullable
+            class GaussDBImpl(pg_impl.PostgresqlImpl):
+                __dialect__ = "gaussdb"
 
-    class GaussDBImpl(PostgresqlImpl):
-        __dialect__ = "gaussdb"
+                def alter_column(self, table_name, column_name, **kw):
+                    """Override to intercept M-compat ALTER COLUMN."""
+                    compat = getattr(self.dialect, "gaussdb_compatibility", None)
+                    new_name = kw.get("name", None)
+                    type_ = kw.get("type_", None)
+                    nullable = kw.get("nullable", None)
 
-        def alter_column(
-            self,
-            table_name,
-            column_name,
-            *,
-            nullable=None,
-            server_default=False,
-            name=None,
-            type_=None,
-            schema=None,
-            autoincrement=None,
-            existing_type=None,
-            existing_server_default=None,
-            existing_nullable=None,
-            existing_autoincrement=None,
-            **kw,
-        ):
-            if not self._is_m_compatibility():
-                if type_ is None:
-                    return super().alter_column(
-                        table_name,
-                        column_name,
-                        nullable=nullable,
-                        server_default=server_default,
-                        name=name,
-                        schema=schema,
-                        autoincrement=autoincrement,
-                        existing_type=existing_type,
-                        existing_server_default=existing_server_default,
-                        existing_nullable=existing_nullable,
-                        existing_autoincrement=existing_autoincrement,
-                        **kw,
-                    )
-                return DefaultImpl.alter_column(
-                    self,
-                    table_name,
-                    column_name,
-                    nullable=nullable,
-                    server_default=server_default,
-                    name=name,
-                    type_=type_,
-                    schema=schema,
-                    autoincrement=autoincrement,
-                    existing_type=existing_type,
-                    existing_server_default=existing_server_default,
-                    existing_nullable=existing_nullable,
-                    existing_autoincrement=existing_autoincrement,
-                    **kw,
-                )
+                    if compat == "M":
+                        existing_type = kw.get("existing_type", None)
+                        existing_nullable = kw.get("existing_nullable", None)
+                        schema = kw.get("schema", None)
 
-            if name is not None:
-                change_type = type_ or existing_type or self._reflect_column_type(
-                    table_name, column_name, schema
-                )
-                self._exec(
-                    GaussDBMChangeColumn(
-                        table_name,
-                        column_name,
-                        name,
-                        change_type,
-                        nullable=nullable,
-                        schema=schema,
-                        existing_type=existing_type,
-                        existing_server_default=existing_server_default,
-                        existing_nullable=existing_nullable,
-                    )
-                )
-                name = None
-                type_ = None
-                existing_type = change_type
-                nullable = None
+                        preparer = self.dialect.identifier_preparer
+                        table_ref = preparer.quote(table_name)
+                        if schema:
+                            table_ref = f"{preparer.quote_schema(schema)}.{table_ref}"
 
-            if type_ is not None or nullable is not None:
-                modify_type = type_ or existing_type or self._reflect_column_type(
-                    table_name, column_name, schema
-                )
-                self._exec(
-                    GaussDBMModifyColumn(
-                        table_name,
-                        column_name,
-                        modify_type,
-                        nullable=nullable,
-                        schema=schema,
-                        existing_type=existing_type,
-                        existing_server_default=existing_server_default,
-                        existing_nullable=existing_nullable,
-                    )
-                )
-                existing_type = modify_type
-                type_ = None
-                nullable = None
+                        # Determine the type to use for MODIFY/CHANGE.
+                        col_type = type_ or existing_type
+                        if col_type is not None:
+                            # Get type DDL string via the dialect's type compiler
+                            try:
+                                type_text = self.dialect.type_compiler_instance.process(col_type)
+                            except Exception:
+                                type_text = "TEXT"
 
-            return DefaultImpl.alter_column(
-                self,
-                table_name,
-                column_name,
-                nullable=nullable,
-                server_default=server_default,
-                name=name,
-                schema=schema,
-                autoincrement=autoincrement,
-                existing_type=existing_type,
-                existing_server_default=existing_server_default,
-                existing_nullable=existing_nullable,
-                existing_autoincrement=existing_autoincrement,
-                **kw,
-            )
+                            if new_name is not None and new_name != column_name:
+                                # M compat: RENAME via CHANGE COLUMN old new <type>
+                                old_ref = preparer.quote(column_name)
+                                new_ref = preparer.quote(new_name)
+                                self._exec(f"ALTER TABLE {table_ref} CHANGE COLUMN {old_ref} {new_ref} {type_text}")
+                            elif type_ is not None:
+                                # M compat: type change via MODIFY COLUMN
+                                col_ref = preparer.quote(column_name)
+                                self._exec(f"ALTER TABLE {table_ref} MODIFY COLUMN {col_ref} {type_text}")
+                        elif new_name is not None and new_name != column_name:
+                            # RENAME COLUMN doesn't require callers to repeat the
+                            # existing type and, unlike the old branch, never
+                            # silently turns a requested migration into a no-op.
+                            old_ref = preparer.quote(column_name)
+                            new_ref = preparer.quote(new_name)
+                            self._exec(
+                                f"ALTER TABLE {table_ref} RENAME COLUMN "
+                                f"{old_ref} TO {new_ref}"
+                            )
 
-        def _is_m_compatibility(self):
-            if getattr(self.dialect, "gaussdb_compatibility", None) == "M":
-                return True
-            if getattr(self, "as_sql", False):
-                return False
-            bind = getattr(self, "bind", None)
-            if bind is None:
-                return False
-            try:
-                compatibility = bind.execute(
-                    text(
-                        """
-                        select datcompatibility::text
-                        from pg_database
-                        where datname = current_database()
-                        """
-                    )
-                ).scalar()
-            except Exception:
-                return False
-            if isinstance(compatibility, bytes):
-                compatibility = compatibility.decode("utf-8")
-            return compatibility == "M"
+                        if nullable is not None:
+                            col_ref = preparer.quote(new_name or column_name)
+                            null_spec = "NULL" if nullable else "NOT NULL"
+                            # M compat: MODIFY COLUMN col NULL/NOT NULL — but M requires type
+                            if col_type is not None:
+                                try:
+                                    type_text = self.dialect.type_compiler_instance.process(col_type)
+                                except Exception:
+                                    type_text = "TEXT"
+                                self._exec(f"ALTER TABLE {table_ref} MODIFY COLUMN {col_ref} {type_text} {null_spec}")
+                            else:
+                                self._exec(f"ALTER TABLE {table_ref} MODIFY COLUMN {col_ref} {null_spec}")
+                        return
 
-        def _reflect_column_type(self, table_name, column_name, schema):
-            if self.bind is None:
-                raise ValueError(
-                    "existing_type is required for M compatibility column rename"
-                )
-            columns = self.dialect.get_columns(self.bind, table_name, schema=schema)
-            for column in columns:
-                if column["name"] == column_name:
-                    return column["type"]
-            raise ValueError(
-                f"Could not reflect column '{column_name}' on table '{table_name}'"
-            )
+                    # A/B compat: use PostgreSQL syntax
+                    super().alter_column(table_name, column_name, **kw)
 
-    from sqlalchemy.ext.compiler import compiles
+            _impls["gaussdb"] = GaussDBImpl
 
-    @compiles(GaussDBMChangeColumn, "gaussdb")
-    def visit_gaussdb_m_change_column(element, compiler, **kw):
-        return "%s CHANGE COLUMN %s %s %s%s" % (
-            base.alter_table(compiler, element.table_name, element.schema),
-            base.format_column_name(compiler, element.column_name),
-            base.format_column_name(compiler, element.newname),
-            base.format_type(compiler, element.type_),
-            _nullable_suffix(element.nullable),
-        )
+        # Compile handlers for base ColumnType (used by GaussDBImpl.alter_column)
+        @compiles(ColumnType, "gaussdb")
+        def _gaussdb_column_type(element, compiler, **kw):
+            dialect = compiler.dialect
+            compat = getattr(dialect, "gaussdb_compatibility", None)
 
-    @compiles(GaussDBMModifyColumn, "gaussdb")
-    def visit_gaussdb_m_modify_column(element, compiler, **kw):
-        return "%s MODIFY COLUMN %s %s%s" % (
-            base.alter_table(compiler, element.table_name, element.schema),
-            base.format_column_name(compiler, element.column_name),
-            base.format_type(compiler, element.type_),
-            _nullable_suffix(element.nullable),
-        )
+            if compat == "M":
+                table_name = compiler.preparer.quote(element.table_name)
+                col_name = compiler.preparer.quote(element.column_name)
+                type_text = dialect.type_compiler_instance.process(element.type_)
+                return f"ALTER TABLE {table_name} MODIFY COLUMN {col_name} {type_text}"
 
-    def _nullable_suffix(nullable):
-        if nullable is None:
-            return ""
-        return " NULL" if nullable else " NOT NULL"
+            # A/B compat: use standard ALTER COLUMN TYPE
+            table_name = compiler.preparer.quote(element.table_name)
+            col_name = compiler.preparer.quote(element.column_name)
+            type_text = dialect.type_compiler_instance.process(element.type_)
+            return f"ALTER TABLE {table_name} ALTER COLUMN {col_name} TYPE {type_text}"
 
-    _REGISTERED = True
-    return True
+        @compiles(ColumnNullable, "gaussdb")
+        def _gaussdb_column_nullable(element, compiler, **kw):
+            dialect = compiler.dialect
+            compat = getattr(dialect, "gaussdb_compatibility", None)
+
+            if compat == "M":
+                table_name = compiler.preparer.quote(element.table_name)
+                col_name = compiler.preparer.quote(element.column_name)
+                null_spec = "NULL" if element.nullable else "NOT NULL"
+                return f"ALTER TABLE {table_name} MODIFY COLUMN {col_name} {null_spec}"
+
+            # A/B compat: standard ALTER COLUMN SET/DROP NOT NULL
+            table_name = compiler.preparer.quote(element.table_name)
+            col_name = compiler.preparer.quote(element.column_name)
+            null_spec = "DROP NOT NULL" if element.nullable else "SET NOT NULL"
+            return f"ALTER TABLE {table_name} ALTER COLUMN {col_name} {null_spec}"
+
+        # Also register PostgresqlColumnType for A/B compat (renders ALTER COLUMN TYPE ... USING)
+        try:
+            PostgresqlColumnType = pg_impl.PostgresqlColumnType
+
+            @compiles(PostgresqlColumnType, "gaussdb")
+            def _gaussdb_pg_column_type(element, compiler, **kw):
+                dialect = compiler.dialect
+                compat = getattr(dialect, "gaussdb_compatibility", None)
+
+                if compat == "M":
+                    table_name = compiler.preparer.quote(element.table_name)
+                    col_name = compiler.preparer.quote(element.column_name)
+                    type_text = dialect.type_compiler_instance.process(element.type_)
+                    return f"ALTER TABLE {table_name} MODIFY COLUMN {col_name} {type_text}"
+
+                # A/B compat: delegate to PG's visit_column_type
+                return pg_impl.visit_column_type(element, compiler, **kw)
+
+        except AttributeError:
+            pass
+
+    except ImportError:
+        # Alembic not installed
+        pass

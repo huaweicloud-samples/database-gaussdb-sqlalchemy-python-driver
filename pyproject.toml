@@ -1,23 +1,23 @@
 [build-system]
-requires = ["setuptools>=69", "wheel"]
+requires = ["setuptools>=77.0.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "gaussdb-sqlalchemy-python-driver"
-version = "0.2.0"
-description = "SQLAlchemy ODBC dialect for Huawei GaussDB centralized."
+name = "gaussdb-sqlalchemy"
+version = "0.1.0"
+description = "SQLAlchemy dialect for Huawei GaussDB, supporting psycopg2 and gaussdb (psycopg3 fork)."
 readme = "README.md"
-requires-python = ">=3.8"
-license = "Apache-2.0"
+requires-python = ">=3.9"
+license = "LGPL-3.0-only"
+license-files = ["LICENSE.txt"]
 authors = [{ name = "GaussDB Python Driver Contributors" }]
-keywords = ["gaussdb", "sqlalchemy", "database", "driver", "odbc", "windows"]
+keywords = ["gaussdb", "sqlalchemy", "database", "driver", "dialect"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX",
+    "Operating System :: Microsoft :: Windows",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -28,22 +28,31 @@ classifiers = [
 ]
 dependencies = [
     "SQLAlchemy>=2.0,<2.2",
-    "pyodbc>=5.0",
 ]
 
 [project.optional-dependencies]
+psycopg3 = [
+    "gaussdb>=1.0.4",
+]
+psycopg2 = [
+]
+alembic = [
+    "alembic>=1.13",
+]
 test = [
     "alembic>=1.13",
-    "pytest>=8",
+    "pytest>=7",
 ]
 
 [project.urls]
-Homepage = "https://github.com/huaweicloud-samples/GaussDB-SQLAlchemy-Python-Driver-Windows"
-Issues = "https://github.com/huaweicloud-samples/GaussDB-SQLAlchemy-Python-Driver-Windows/issues"
+Homepage = "https://github.com/huaweicloud-samples/database-gaussdb-sqlalchemy-python-driver/tree/feature/sqlalchemy-dialect-psycopg2-psycopg3"
+Issues = "https://github.com/huaweicloud-samples/database-gaussdb-sqlalchemy-python-driver/issues"
 
 [project.entry-points."sqlalchemy.dialects"]
-gaussdb = "gaussdb_sqlalchemy.odbc:GaussDBDialect_odbc"
-"gaussdb.odbc" = "gaussdb_sqlalchemy.odbc:GaussDBDialect_odbc"
+gaussdb = "gaussdb_sqlalchemy.base:GaussDBDialect"
+"gaussdb.psycopg" = "gaussdb_sqlalchemy.base:GaussDBDialect"
+"gaussdb.gaussdb" = "gaussdb_sqlalchemy.base:GaussDBDialect"
+"gaussdb.psycopg2" = "gaussdb_sqlalchemy.base:GaussDBDialect_psycopg2"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -51,7 +60,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q"
-markers = [
-    "integration: tests that require a live GaussDB database",
-]
+addopts = "-ra"
+filterwarnings = ["error"]
+markers = ["integration: tests that require a live GaussDB database"]
