@@ -7,12 +7,14 @@ ODBC 方案的替换。`main` 的源码、Windows 方案和发布包保持不变
 
 - 分支基线：目标仓库 ODBC `main` 提交
   [`3e472ed465875bd3e47ed384e86e9c1e4a824016`](https://github.com/huaweicloud-samples/database-gaussdb-sqlalchemy-python-driver/commit/3e472ed465875bd3e47ed384e86e9c1e4a824016)。
-- 方言、测试、指导和随附 psycopg2 文件来自
-  [`jarrenL/gaussdb-python@bbb81f44a0d46483961d30a58ab2171e4af384ac`](https://github.com/jarrenL/gaussdb-python/tree/bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb_sqlalchemy)。
-- `src/gaussdb_sqlalchemy/` 四个运行时模块保持该来源提交的内容不变；迁移调整
-  限于目录布局、构建元数据、测试启动路径、CI 和文档。
+- 方言、测试、指导和随附 psycopg2 文件的本仓库引入基线为
+  [`18bc1e156d83d04a1cae49c73703c4ea7b14467e`](https://github.com/huaweicloud-samples/database-gaussdb-sqlalchemy-python-driver/commit/18bc1e156d83d04a1cae49c73703c4ea7b14467e)。
+- `src/gaussdb_sqlalchemy/` 四个运行时模块保持该引入基线的内容不变。
 - 未迁入 `gaussdb` / `gaussdb_pool` 驱动源码或 libpq/OpenSSL；驱动独立获取、安装。
   修复版底层驱动的获取和构建步骤见 [Linux 双驱动启动](docs/Linux双驱动启动.md)。
+- 底层驱动采用[官方源码基线 9481e982](https://github.com/huaweicloud-samples/database-gaussdb-python/tree/9481e9828c4c33157ec538a939059ad7a2bea08d)
+  加本仓库的 [GAUSSDB_LIBPQ_PATH 配套补丁](patches/gaussdb-libpq-path.patch)；
+  补丁不代表官方上游已合入，不包含其他底层驱动改动，也不打入方言 wheel。
 
 ## 许可范围
 

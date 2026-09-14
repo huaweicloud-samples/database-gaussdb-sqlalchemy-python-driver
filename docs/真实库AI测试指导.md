@@ -53,8 +53,8 @@ INSERT游标关闭后rowcount、实际影响行数与参数数量不一致。唯
 
 | 场景 | CPU 架构 | 底层驱动 | SQLAlchemy URL 前缀 | 安装要求 |
 |------|----------|----------|---------------------|----------|
-| 1 | x86_64 | psycopg3 | `gaussdb+psycopg://` | 安装下文指定提交的修复版 `gaussdb` |
-| 2 | arm64/aarch64 | psycopg3 | `gaussdb+psycopg://` | 安装下文指定提交的修复版 `gaussdb` |
+| 1 | x86_64 | psycopg3 | `gaussdb+psycopg://` | 安装下文官方源码应用配套补丁后的 `gaussdb` |
+| 2 | arm64/aarch64 | psycopg3 | `gaussdb+psycopg://` | 安装下文官方源码应用配套补丁后的 `gaussdb` |
 | 3 | x86_64 | psycopg2 | `gaussdb+psycopg2://` | 安装 x86_64 对应的 psycopg2 whl 包 |
 | 4 | arm64/aarch64 | psycopg2 | `gaussdb+psycopg2://` | 安装 arm64/aarch64 对应的 psycopg2 whl 包 |
 
@@ -106,7 +106,7 @@ Python 版本支持验证结论：
 - 其他 Python 版本的 psycopg2 路线，需要驱动侧提供对应 Python 版本、
   Linux 平台和 CPU 架构的官方 wheel，并重新执行全部真实库测试。
 - psycopg3 路线依赖 `gaussdb>=1.0.4`，要求 Python 3.9+；Linux 显式动态库路径
-  还依赖下文指定源码提交的修复，不能仅凭版本号确认。
+  还依赖下文的库路径加载补丁，不能仅凭版本号确认。
 - 此表记录方言版本范围及历史验证，不表示所有 Python / CPU / 数据库模式组合
   已完成真实库验收；实际边界见前述修复报告。
 
@@ -141,7 +141,7 @@ python -m pip install '.[test]'
 | 方言源码 | 是 | `src/gaussdb_sqlalchemy/` |
 | 单元和真实库测试 | 是 | `tests/` |
 | pytest、SQLAlchemy、Alembic | 否 | 安装 `.[test]` 时由 pip 获取；内网需提前同步这些 Python 包 |
-| psycopg3 驱动 `gaussdb` | 否 | 从下文固定提交下载独立驱动源码，非 editable 安装或构建 wheel |
+| psycopg3 驱动 `gaussdb` | 仅含配套补丁 | 从官方仓库下载独立源码，应用 `patches/gaussdb-libpq-path.patch` 后非 editable 安装或构建 wheel |
 | psycopg2 官方 wheel | 是 | `vendor/gaussdb_psycopg2/`，按 CPU 架构二选一 |
 | psycopg3 所需 libpq / OpenSSL 等动态库 | 否 | 由目标环境提供匹配 CPU 架构的 GaussDB 客户端库 |
 | GaussDB 地址和测试账号 | 否 | 测试人员通过环境变量提供，禁止写入仓库 |
@@ -154,13 +154,14 @@ Python 制品库或 wheelhouse。数据库地址、用户名和密码属于环�
 
 psycopg3 路线：官方来源为
 [`huaweicloud-samples/database-gaussdb-python`](https://github.com/huaweicloud-samples/database-gaussdb-python)。
-Linux 启动脚本依赖 `GAUSSDB_LIBPQ_PATH`，目前应从
-[`JarrenL/gaussdb-python` 固定提交 bbb81f44](https://github.com/jarrenL/gaussdb-python/tree/bbb81f44a0d46483961d30a58ab2171e4af384ac)
-的[完整源码 ZIP](https://github.com/jarrenL/gaussdb-python/archive/bbb81f44a0d46483961d30a58ab2171e4af384ac.zip)
-取得修复版。解压在独立目录，然后从当前方言仓库根目录执行：
+Linux 启动脚本依赖 `GAUSSDB_LIBPQ_PATH`；官方源码基线尚未包含此功能。
+请先按[Linux 双驱动启动](Linux双驱动启动.md)下载官方固定基线源码并应用
+本仓库[库路径加载补丁](../patches/gaussdb-libpq-path.patch)。
+以下 `/path/to/gaussdb-python` 均指已经应用该补丁的独立源码目录。
+完成准备后，从当前方言仓库根目录执行：
 
 ```bash
-python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb
+python -m pip install /path/to/gaussdb-python/gaussdb
 python -m pip install '.[test]'
 ```
 
@@ -195,7 +196,7 @@ psycopg2 路线需要安装与当前机器匹配的 GaussDB 官方 wheel，至�
 如果目标环境已确认两种驱动的依赖可以同装，准备命令为：
 
 ```bash
-python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb
+python -m pip install /path/to/gaussdb-python/gaussdb
 python -m pip install vendor/gaussdb_psycopg2/*-py311-none-linux_对应CPU架构.whl
 python -m pip install '.[test]'
 ```
@@ -439,7 +440,7 @@ python -m pytest tests/test_dialect_integration.py -v -rs
 处理：
 
 ```bash
-python -m pip install /path/to/gaussdb-python-bbb81f44a0d46483961d30a58ab2171e4af384ac/gaussdb
+python -m pip install /path/to/gaussdb-python/gaussdb
 ```
 
 独立驱动源码下载及离线 wheel 构建见 2.3 节；不能在本方言仓库查找 `gaussdb/`。
@@ -483,9 +484,9 @@ python -m pip install vendor/gaussdb_psycopg2/*-py311-none-linux_对应CPU架构
 1. 确认分支为 feature/sqlalchemy-dialect-psycopg2-psycopg3。
 2. 创建 Python 虚拟环境。
 3. 在本方言仓库根目录安装 '.[test]'。
-   - psycopg3 按 docs/Linux双驱动启动.md，从 JarrenL/gaussdb-python 固定提交
-     bbb81f44a0d46483961d30a58ab2171e4af384ac 的独立源码目录非 editable 安装驱动，
-     或安装该提交构建的 wheel；本方言仓库不含 gaussdb 驱动源码。
+   - psycopg3 按 docs/Linux双驱动启动.md 下载官方固定基线源码，应用本仓库的
+     patches/gaussdb-libpq-path.patch 后，从独立源码目录非 editable 安装驱动，
+     或安装应用补丁后构建的 wheel；本方言仓库不含 gaussdb 驱动完整源码。
    - psycopg2 使用 vendor/gaussdb_psycopg2/ 中与
      Python 版本和 CPU 架构匹配的官方 wheel，不安装公共 psycopg2-binary
 4. 根据实际数据库信息和机器架构设置以下环境变量中的一个或多个：

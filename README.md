@@ -71,10 +71,11 @@ Linux 启动脚本使用 `GAUSSDB_LIBPQ_PATH` 指定动态库。请使用包含�
 且与目标环境匹配的配套驱动；不能仅凭 `gaussdb>=1.0.4` 的版本号判断，
 旧 PyPI 包不保证支持这个变量。驱动准备及加载验证步骤见
 [Linux 双驱动启动指导](docs/Linux双驱动启动.md)。
-如需自行构建，请在已准备好的独立驱动源码目录执行：
+如需自行构建，须先按该指导对官方源码应用本仓库的
+[库路径加载补丁](patches/gaussdb-libpq-path.patch)，再在独立驱动源码目录执行：
 
 ```bash
-# 这里是独立的 gaussdb-python 驱动源码目录，不是当前 SQLAlchemy 仓库。
+# 这里是已应用配套补丁的独立驱动源码目录，不是当前 SQLAlchemy 仓库。
 cd /path/to/gaussdb-python
 python -m pip install build
 python -m build --wheel gaussdb
